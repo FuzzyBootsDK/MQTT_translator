@@ -1,0 +1,62 @@
+# Environment Variables
+.env
+
+# Build Folders
+bin/
+obj/
+
+# User-Specific Files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Logs
+*.log
+
+# Temporary Files
+*.tmp
+*.temp
+*.pid
+*.gz
+*.swp
+*.swo
+*.bak
+*.orig
+
+# Visual Studio Specific
+.vscode/
+.vs/
+*.vcxproj.user
+*.pdb
+
+# Rider Specific
+.idea/
+*.sln.iml
+
+# NuGet Packages
+*.nupkg
+packages/
+.nuget/
+
+# DotNet Tools
+.dotnet_tool/
+
+# Publish Outputs
+publish/
+out/
+
+# Resharper
+_ReSharper*/
+*.DotSettings.user
+
+# Entity Framework Migrations
+Migrations/
+
+# OS-Specific Files
+.DS_Store
+Thumbs.db
+
+# Other
+*.lock.json
+project.lock.json
