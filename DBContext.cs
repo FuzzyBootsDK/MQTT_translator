@@ -13,8 +13,10 @@ namespace MQTT_translator
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
+            string appDirectory = AppDomain.CurrentDomain.BaseDirectory;
+            string envFilePath = System.IO.Path.Combine(appDirectory, ".env");
             // Load environment variables from the .env file
-            DotNetEnv.Env.Load();
+            DotNetEnv.Env.Load(envFilePath);
 
             // Retrieve individual fields from the environment variables
             var server = Environment.GetEnvironmentVariable("DB_SERVER");
