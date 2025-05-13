@@ -18,6 +18,12 @@ class Program
     // Token source to manage cancellation of background tasks
     private static CancellationTokenSource _cts = new();
 
+    // JSON options for case-insensitive property matching
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     static async Task Main(string[] args)
     {
         // Create an MQTT client using a factory
@@ -36,20 +42,40 @@ class Program
             {
                 // Decode the payload and deserialize it into a SensorData_Model object
                 var payloadString = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
-                var sensorData = JsonSerializer.Deserialize<SensorData_Model>(payloadString);
+                Console.WriteLine($"Raw payload: {payloadString}");
 
-                if (sensorData != null)
+                // Only attempt to deserialize if the payload looks like JSON
+                if (!string.IsNullOrWhiteSpace(payloadString) && payloadString.TrimStart().StartsWith("{"))
                 {
-                    // Round temperature and humidity values to 2 decimal places
-                    sensorData.Temperature = Math.Round(sensorData.Temperature, 2);
-                    sensorData.Humidity = Math.Round(sensorData.Humidity, 2);
+                    try
+                    {
+                        var sensorData = JsonSerializer.Deserialize<SensorData_Model>(payloadString, _jsonOptions);
+                        if (sensorData != null)
+                        {
+                            sensorData.Temperature = Math.Round(sensorData.Temperature, 2);
+                            sensorData.Humidity = Math.Round(sensorData.Humidity, 2);
+                            _sensorQueue.Enqueue(sensorData);
 
-                    // Enqueue the processed sensor data for further handling
-                    _sensorQueue.Enqueue(sensorData);
+                            // Clear the console and write the deserialized JSON
+                            Console.Clear();
+                            Console.WriteLine("Press Enter to exit...");
+                            string jsonOutput = JsonSerializer.Serialize(sensorData, new JsonSerializerOptions { WriteIndented = true });
+                            Console.WriteLine("Deserialized Sensor Data:");
+                            Console.WriteLine(jsonOutput);
+                        }
+                        else
+                        {
+                            Console.WriteLine("Could not parse sensor data.");
+                        }
+                    }
+                    catch (JsonException jsonEx)
+                    {
+                        Console.WriteLine($"JSON deserialization error: {jsonEx.Message}");
+                    }
                 }
                 else
                 {
-                    Console.WriteLine("Could not parse sensor data.");
+                    Console.WriteLine("Ignored non-JSON payload.");
                 }
             }
             catch (Exception ex)
@@ -83,37 +109,42 @@ class Program
     /// <param name="token">Cancellation token to stop the task.</param>
     private static async Task ProcessQueueAsync(CancellationToken token)
     {
-        while (!token.IsCancellationRequested)
+        try
         {
-            var batch = new List<SensorData_Model>();
-
-            // Dequeue up to 50 items from the queue for batch processing
-            while (_sensorQueue.TryDequeue(out var data))
+            while (!token.IsCancellationRequested)
             {
-                batch.Add(data);
-                if (batch.Count >= 50) break;
-            }
+                var batch = new List<SensorData_Model>();
 
-            if (batch.Any())
-            {
-                try
+                // Dequeue up to 50 items from the queue for batch processing
+                while (_sensorQueue.TryDequeue(out var data))
                 {
-                    // Save the batch of sensor data to the database
-                    using var dbContext = new DBContext();
-                    dbContext.SensorData.AddRange(batch);
-                    await dbContext.SaveChangesAsync();
+                    batch.Add(data);
+                    if (batch.Count >= 50) break;
                 }
-                catch (Exception ex)
-                {
-                    // Log any database write errors
-                    Console.WriteLine($"Database write error: {ex.Message}");
-                }
-            }
 
-            // Delay to control processing frequency
-            await Task.Delay(1000, token); // Adjust delay as needed
+                if (batch.Any())
+                {
+                    try
+                    {
+                        using var dbContext = new DBContext();
+                        dbContext.SensorData.AddRange(batch);
+                        await dbContext.SaveChangesAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Database write error: {ex.Message}");
+                    }
+                }
+
+                await Task.Delay(1000, token); // This will throw TaskCanceledException when cancelled
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            // Normal shutdown, no action needed
         }
     }
+
 
     /// <summary>
     /// Periodically cleans up old sensor data from the database.
@@ -121,25 +152,32 @@ class Program
     /// <param name="token">Cancellation token to stop the task.</param>
     private static async Task PeriodicCleanupAsync(CancellationToken token)
     {
-        while (!token.IsCancellationRequested)
+        try
         {
-            try
+            while (!token.IsCancellationRequested)
             {
-                // Remove sensor data older than 6 months
-                using var dbContext = new DBContext();
-                var sixMonthsAgo = DateTime.Now.AddMonths(-6);
-                var oldData = dbContext.SensorData.Where(d => d.Date < sixMonthsAgo);
-                dbContext.SensorData.RemoveRange(oldData);
-                await dbContext.SaveChangesAsync();
-            }
-            catch (Exception ex)
-            {
-                // Log any cleanup errors
-                Console.WriteLine($"Cleanup error: {ex.Message}");
-            }
+                try
+                {
+                    // Remove sensor data older than 6 months
+                    using var dbContext = new DBContext();
+                    var sixMonthsAgo = DateTime.Now.AddMonths(-6);
+                    var oldData = dbContext.SensorData.Where(d => d.Date < sixMonthsAgo);
+                    dbContext.SensorData.RemoveRange(oldData);
+                    await dbContext.SaveChangesAsync();
+                }
+                catch (Exception ex)
+                {
+                    // Log any cleanup errors
+                    Console.WriteLine($"Cleanup error: {ex.Message}");
+                }
 
-            // Delay to run cleanup twice a day
-            await Task.Delay(TimeSpan.FromHours(12), token);
+                // Delay to run cleanup twice a day
+                await Task.Delay(TimeSpan.FromHours(12), token);
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            // Normal shutdown, no action needed
         }
     }
 }
